@@ -1,27 +1,25 @@
+# Python
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.DS_Store
-.env
 
+# Environment and secrets
+.env
+.DS_Store
+
+# MLflow runtime
 mlruns/
 .mlflow/
+mlflow/database/
+mlflow/artifacts/
+
+# Generated model artifacts
 models/
+
+# DVC-managed data directories
 data/raw/
 data/processed/
 
+# Logs
 *.log
-
-
-# MLflow runtime
-mlflow/database/
-mlflow/artifacts/
-mlruns/
-
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.env
-.DS_Store

@@ -1,0 +1,11 @@
+stages:
+  train:
+    cmd: python src/train.py
+    deps:
+      - src/train.py
+      - data/raw/train.csv
+      - data/raw/test.csv
+    metrics:
+      - reports/metrics.json
+    outs:
+      - reports/classification_report.json

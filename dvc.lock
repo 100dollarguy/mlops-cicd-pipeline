@@ -1,0 +1,26 @@
+schema: '2.0'
+stages:
+  train:
+    cmd: python src/train.py
+    deps:
+    - path: data/raw/test.csv
+      hash: md5
+      md5: a0864871521c5b0a3859dc0e54ccbc29
+      size: 24681
+    - path: data/raw/train.csv
+      hash: md5
+      md5: 7bab774b027c20cb0c5d906f7b085507
+      size: 97196
+    - path: src/train.py
+      hash: md5
+      md5: fa5189db82d9d5992195f4a10d65da58
+      size: 3181
+    outs:
+    - path: reports/classification_report.json
+      hash: md5
+      md5: c4d986a415dacfb30ad70be781f80834
+      size: 703
+    - path: reports/metrics.json
+      hash: md5
+      md5: 90d71f1833e68dbdafd10ba687524109
+      size: 145
