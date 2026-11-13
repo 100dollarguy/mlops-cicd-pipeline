@@ -1,0 +1,16 @@
+name: mlops-cicd
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - mlflow
+      - dvc
+      - scikit-learn
+      - pandas
+      - numpy
+      - joblib
+      - pytest

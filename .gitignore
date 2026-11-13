@@ -1,0 +1,27 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+.env
+
+mlruns/
+.mlflow/
+models/
+data/raw/
+data/processed/
+
+*.log
+
+
+# MLflow runtime
+mlflow/database/
+mlflow/artifacts/
+mlruns/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.DS_Store
