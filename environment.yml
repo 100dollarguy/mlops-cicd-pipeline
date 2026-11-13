@@ -7,10 +7,11 @@ dependencies:
   - python=3.12
   - pip
   - pip:
-      - mlflow
-      - dvc
-      - scikit-learn
-      - pandas
-      - numpy
-      - joblib
-      - pytest
+      - dvc==3.67.1
+      - joblib==1.6.0
+      - mlflow==3.18.0
+      - numpy==2.5.4
+      - pandas==3.1.1
+      - pytest==9.2.0
+      - pytest-cov==7.1.0
+      - scikit-learn==1.9.1

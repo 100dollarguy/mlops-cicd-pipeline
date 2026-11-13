@@ -1,11 +1,12 @@
-
 from pathlib import Path
 import json
+import os
 
-import joblib
 import mlflow
 import mlflow.sklearn
 import pandas as pd
+
+from mlflow.models import infer_signature
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -23,31 +24,119 @@ from sklearn.preprocessing import StandardScaler
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = PROJECT_ROOT / "data" / "raw"
-MODEL_DIR = PROJECT_ROOT / "models"
 REPORT_DIR = PROJECT_ROOT / "reports"
 
 TARGET = "target"
-
-MLFLOW_TRACKING_URI = "http://127.0.0.1:5000"
 EXPERIMENT_NAME = "breast-cancer-classification"
-REGISTERED_MODEL_NAME = "BreastCancerClassifier"
 
 
-def train_model():
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+def load_data():
+    train_path = DATA_DIR / "train.csv"
+    test_path = DATA_DIR / "test.csv"
 
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    if not train_path.exists() or not test_path.exists():
+        raise FileNotFoundError(
+            "Training or testing dataset is missing."
+        )
 
-    train_df = pd.read_csv(DATA_DIR / "train.csv")
-    test_df = pd.read_csv(DATA_DIR / "test.csv")
+    train_df = pd.read_csv(train_path)
+    test_df = pd.read_csv(test_path)
+
+    validate_data(train_df, test_df)
 
     X_train = train_df.drop(columns=[TARGET])
     y_train = train_df[TARGET]
 
     X_test = test_df.drop(columns=[TARGET])
     y_test = test_df[TARGET]
+
+    return X_train, X_test, y_train, y_test
+
+
+def validate_data(train_df, test_df):
+    for name, df in [
+        ("training", train_df),
+        ("testing", test_df),
+    ]:
+        if TARGET not in df.columns:
+            raise ValueError(
+                f"{name} dataset is missing the target column."
+            )
+
+        if df.empty:
+            raise ValueError(
+                f"{name} dataset is empty."
+            )
+
+        if df.isnull().any().any():
+            raise ValueError(
+                f"{name} dataset contains missing values."
+            )
+
+        if set(df[TARGET].unique()) != {0, 1}:
+            raise ValueError(
+                f"{name} dataset must contain target labels 0 and 1."
+            )
+
+    train_features = set(train_df.columns) - {TARGET}
+    test_features = set(test_df.columns) - {TARGET}
+
+    if train_features != test_features:
+        raise ValueError(
+            "Training and testing feature columns do not match."
+        )
+
+
+def evaluate_model(model, X_test, y_test):
+    predictions = model.predict(X_test)
+
+    metrics = {
+        "accuracy": accuracy_score(y_test, predictions),
+        "precision": precision_score(
+            y_test,
+            predictions,
+            zero_division=0,
+        ),
+        "recall": recall_score(
+            y_test,
+            predictions,
+            zero_division=0,
+        ),
+        "f1_score": f1_score(
+            y_test,
+            predictions,
+            zero_division=0,
+        ),
+    }
+
+    report = classification_report(
+        y_test,
+        predictions,
+        output_dict=True,
+        zero_division=0,
+    )
+
+    return metrics, report, confusion_matrix(
+        y_test,
+        predictions,
+    )
+
+
+def save_reports(metrics, report):
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+    metrics_path = REPORT_DIR / "metrics.json"
+    report_path = REPORT_DIR / "classification_report.json"
+
+    with open(metrics_path, "w") as file:
+        json.dump(metrics, file, indent=4)
+
+    with open(report_path, "w") as file:
+        json.dump(report, file, indent=4)
+
+
+def train_model():
+    X_train, X_test, y_train, y_test = load_data()
 
     parameters = {
         "algorithm": "LogisticRegression",
@@ -57,67 +146,76 @@ def train_model():
         "random_state": 42,
     }
 
-    with mlflow.start_run(run_name="logistic-regression") as run:
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("classifier", LogisticRegression(max_iter=1000)),
+    ])
 
-        model = Pipeline([
-            ("scaler", StandardScaler()),
-            ("classifier", LogisticRegression(max_iter=1000)),
-        ])
+    model.fit(X_train, y_train)
 
-        model.fit(X_train, y_train)
+    metrics, report, matrix = evaluate_model(
+        model,
+        X_test,
+        y_test,
+    )
 
-        predictions = model.predict(X_test)
+    save_reports(metrics, report)
 
-        metrics = {
-            "accuracy": accuracy_score(y_test, predictions),
-            "precision": precision_score(y_test, predictions),
-            "recall": recall_score(y_test, predictions),
-            "f1_score": f1_score(y_test, predictions),
-        }
+    # MLflow experiment tracking
+    mlflow_enabled = (
+        os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
+    )
 
-        mlflow.log_params(parameters)
-        mlflow.log_metrics(metrics)
-
-        report = classification_report(
-            y_test,
-            predictions,
-            output_dict=True,
+    if mlflow_enabled:
+        tracking_uri = os.getenv(
+            "MLFLOW_TRACKING_URI",
+            "http://127.0.0.1:5000",
         )
 
-        report_path = REPORT_DIR / "classification_report.json"
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(EXPERIMENT_NAME)
 
-        with open(report_path, "w") as file:
-            json.dump(report, file, indent=4)
+        with mlflow.start_run(
+            run_name="logistic-regression"
+        ) as run:
 
-        metrics_path = REPORT_DIR / "metrics.json"
+            mlflow.log_params(parameters)
+            mlflow.log_metrics(metrics)
 
-        with open(metrics_path, "w") as file:
-            json.dump(metrics, file, indent=4)
+            mlflow.log_artifact(
+                str(REPORT_DIR / "metrics.json")
+            )
 
-        joblib.dump(model, MODEL_DIR / "model.joblib")
+            mlflow.log_artifact(
+                str(REPORT_DIR / "classification_report.json")
+            )
 
-        mlflow.log_artifact(str(metrics_path))
-        mlflow.log_artifact(str(report_path))
+            # Explicit model input and output signature
+            input_example = X_train.head(5).astype("float64")
 
-        mlflow.sklearn.log_model(
-            sk_model=model,
-            name="breast-cancer-model",
-            registered_model_name=REGISTERED_MODEL_NAME,
-            input_example=X_train.head(5),
-        )
+            signature = infer_signature(
+                input_example,
+                model.predict(input_example),
+            )
 
-        print("\nMLflow Run ID:", run.info.run_id)
+            mlflow.sklearn.log_model(
+                sk_model=model,
+                name="breast-cancer-model",
+                input_example=input_example,
+                signature=signature,
+            )
 
-        print("\nModel Evaluation")
-        print("----------------")
-        print(json.dumps(metrics, indent=4))
+            print("\nMLflow Run ID:", run.info.run_id)
 
-        print("\nConfusion Matrix")
-        print(confusion_matrix(y_test, predictions))
+    print("\nModel Evaluation")
+    print("----------------")
+    print(json.dumps(metrics, indent=4))
 
-        print("\nModel registered:", REGISTERED_MODEL_NAME)
+    print("\nConfusion Matrix")
+    print(matrix)
+
+    return metrics
 
 
 if __name__ == "__main__":
     train_model()
-
