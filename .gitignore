@@ -27,3 +27,4 @@ data/processed/
 # Test coverage
 .coverage
 htmlcov/
+/mlflow.db
