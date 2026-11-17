@@ -77,7 +77,24 @@ This repository brings together:
                                         ▼
                               ┌────────────────────┐
                               │ Production Alias   │
+                              └─────────┬──────────┘
+                                        │
+                                        ▼
+                              ┌────────────────────┐
+                              │ Docker Model       │
+                              │ Serving Container  │
                               └────────────────────┘
+
+                 ┌────────────────────────┐
+                 │ Git Tag: promote-vN-   │
+                 │ from-vCURRENT          │
+                 └───────────┬────────────┘
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │ GitHub Actions         │
+                 │ Validated Promotion    │
+                 └────────────────────────┘
 
                  ┌────────────────────────┐
                  │ Rollback Workflow      │
@@ -103,7 +120,8 @@ This repository brings together:
 | Model Registry | MLflow Model Registry |
 | Data & Pipeline Versioning | DVC |
 | Testing | Pytest, pytest-cov |
-| CI | GitHub Actions |
+| CI / Promotion Automation | GitHub Actions |
+| Containerization | Docker |
 | Environment Management | Conda |
 | Metadata Storage | SQLite |
 | Model Artifact Storage | Local filesystem |
@@ -114,7 +132,10 @@ This repository brings together:
 mlops-cicd-pipeline/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml
+│       ├── ci.yml
+│       └── model-promotion.yml
+├── Dockerfile
+├── .dockerignore
 ├── data/
 │   ├── raw.dvc
 │   ├── raw/
@@ -191,7 +212,7 @@ In a separate terminal, activate the environment and run:
 
 ```bash
 mlflow server \
-  --host 127.0.0.1 \
+  --host 0.0.0.0 \
   --port 5001 \
   --backend-store-uri sqlite:///mlflow/database/mlflow.db \
   --artifacts-destination ./mlflow/artifacts
@@ -207,7 +228,7 @@ Open the MLflow UI:
 
 http://127.0.0.1:5001
 
-The tracking server uses a local SQLite backend and local artifact storage in the development setup.
+The tracking server uses a local SQLite backend and local artifact storage in the development setup. Binding to `0.0.0.0` allows Docker Desktop containers to reach it through `host.docker.internal`; restrict access with host firewall rules and do not expose the tracking port to untrusted networks.
 
 ### 5. Run the DVC pipeline
 
@@ -393,7 +414,7 @@ The workflow records rollback intent before changing the production alias and at
 
 **Important:** MLflow alias changes and audit-tag updates are separate operations, not a single atomic transaction. The expected-current check reduces the risk of overwriting an unexpected production version but does not provide atomic compare-and-swap protection.
 
-The production alias is a registry pointer. This project currently implements model lifecycle management through MLflow aliases; it does not yet implement a separate model-serving or deployment environment.
+The production alias is a registry pointer. The Docker image serves the model referenced by this alias through the MLflow scoring server. The image does not contain the MLflow tracking database or model artifacts; it resolves the production alias from the configured MLflow tracking server when it starts.
 
 ## Testing
 
@@ -453,6 +474,57 @@ The hosted CI workflow generates the dataset directly rather than accessing the 
 
 MLflow integration is disabled in the CI environment where a running local tracking server is not available.
 
+## Git-Tag-Based Model Promotion
+
+The `model-promotion.yml` workflow promotes a model when a tag matching this format is pushed:
+
+```text
+promote-v<TARGET_VERSION>-from-v<EXPECTED_PRODUCTION_VERSION>
+```
+
+For example, if model version `7` is currently assigned to the `staging` alias and production currently points to version `6`, create and push:
+
+```bash
+git tag promote-v7-from-v6
+git push origin promote-v7-from-v6
+```
+
+The workflow extracts both versions and calls the existing promotion script with `--approve`. The script still verifies that the candidate is the current staging version, passes validation, and that production matches the expected version encoded in the tag.
+
+Configure the GitHub Actions repository secret `MLFLOW_TRACKING_URI` with the URL of an MLflow tracking server reachable from GitHub-hosted runners. A local `127.0.0.1` tracking URI will not work from GitHub Actions. The workflow does not provision or host an MLflow server.
+
+Only authorized users should be allowed to create and push `promote-*` tags. Protect the tag pattern with repository rulesets or equivalent access controls because pushing a valid tag requests a production promotion.
+
+## Docker Model Serving
+
+Build the image:
+
+```bash
+docker build -t breast-cancer-model:latest .
+```
+
+Run it with the MLflow tracking server URI reachable from the container:
+
+```bash
+docker run --rm \\
+  -p 5002:5002 \\
+  -e MLFLOW_TRACKING_URI="http://host.docker.internal:5001" \\
+  breast-cancer-model:latest
+```
+
+The container serves `models:/BreastCancerClassifier@production` on port `5002`. The MLflow tracking server and its artifact store must be reachable from the container. For a remote server, replace the example URI with its reachable URL.
+
+Send a prediction request to the MLflow scoring endpoint:
+
+```bash
+curl -X POST http://localhost:5002/invocations \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer <TOKEN_IF_CONFIGURED>" \\
+  -d @serving_input.json
+```
+
+Use an input payload matching the model signature. The MLflow server may enforce authentication depending on the tracking/serving setup. Do not expose the serving port publicly without appropriate authentication and network controls.
+
 ## DVC Storage
 
 The development setup uses a local DVC remote for storing dataset versions and cached artifacts.
@@ -475,16 +547,17 @@ Implemented:
 - Rollback with audit metadata and failure handling.
 - Automated unit and integration tests.
 - GitHub Actions continuous integration.
+- Git-tag-triggered model promotion workflow.
+- Docker image for serving the production model alias.
 - Code coverage enforcement.
 
 Future improvements:
 
 - Dedicated staging and production deployment environments.
-- Automated model serving and inference endpoints.
 - Deployment health checks and monitoring.
 - Automated model performance and data drift detection.
 - Remote DVC storage for shared environments.
-- Automated deployment and rollback integration.
+- Automated deployment health verification and rollback integration.
 
 ---
 

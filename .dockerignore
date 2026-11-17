@@ -1,0 +1,14 @@
+.git
+.github
+.dvc
+.pytest_cache
+__pycache__
+*.py[cod]
+.coverage
+mlflow
+mlruns
+mlflow.db
+models
+reports
+tests
+data
