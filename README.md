@@ -215,7 +215,8 @@ mlflow server \
   --host 0.0.0.0 \
   --port 5001 \
   --backend-store-uri sqlite:///mlflow/database/mlflow.db \
-  --artifacts-destination ./mlflow/artifacts
+  --artifacts-destination ./mlflow/artifacts \
+  --allowed-hosts "127.0.0.1:5001,localhost:5001,host.docker.internal:5001"
 ```
 
 Configure the tracking URI in the project terminal:
@@ -229,6 +230,8 @@ Open the MLflow UI:
 http://127.0.0.1:5001
 
 The tracking server uses a local SQLite backend and local artifact storage in the development setup. Binding to `0.0.0.0` allows Docker Desktop containers to reach it through `host.docker.internal`; restrict access with host firewall rules and do not expose the tracking port to untrusted networks.
+
+The MLflow database and artifact directory are local runtime data and are not included in a fresh Git clone. A new environment therefore starts without the registered model versions or production/staging aliases from the development machine. Run the training and model-registration workflow to populate a new registry, or configure the project to use an existing MLflow tracking server with its corresponding artifacts.
 
 ### 5. Run the DVC pipeline
 
@@ -491,7 +494,7 @@ git push origin promote-v7-from-v6
 
 The workflow extracts both versions and calls the existing promotion script with `--approve`. The script still verifies that the candidate is the current staging version, passes validation, and that production matches the expected version encoded in the tag.
 
-Configure the GitHub Actions repository secret `MLFLOW_TRACKING_URI` with the URL of an MLflow tracking server reachable from GitHub-hosted runners. A local `127.0.0.1` tracking URI will not work from GitHub Actions. The workflow does not provision or host an MLflow server.
+Configure the GitHub Actions repository secret `MLFLOW_TRACKING_URI` with the URL of an MLflow tracking server reachable from the self-hosted runner. The promotion workflow runs on a self-hosted GitHub Actions runner, which must have the `mlops-cicd` Conda environment installed and access to the MLflow server. If both run on the same machine, `http://127.0.0.1:5001` can be used. The workflow does not provision or host an MLflow server.
 
 Only authorized users should be allowed to create and push `promote-*` tags. Protect the tag pattern with repository rulesets or equivalent access controls because pushing a valid tag requests a production promotion.
 
@@ -500,16 +503,16 @@ Only authorized users should be allowed to create and push `promote-*` tags. Pro
 Build the image:
 
 ```bash
-docker build -t breast-cancer-model:latest .
+docker build -t mlops-model-serving:v1 .
 ```
 
 Run it with the MLflow tracking server URI reachable from the container:
 
 ```bash
-docker run --rm \\
-  -p 5002:5002 \\
-  -e MLFLOW_TRACKING_URI="http://host.docker.internal:5001" \\
-  breast-cancer-model:latest
+docker run --rm \
+  -p 5002:5002 \
+  -e MLFLOW_TRACKING_URI="http://host.docker.internal:5001" \
+  mlops-model-serving:v1
 ```
 
 The container serves `models:/BreastCancerClassifier@production` on port `5002`. The MLflow tracking server and its artifact store must be reachable from the container. For a remote server, replace the example URI with its reachable URL.
@@ -517,9 +520,9 @@ The container serves `models:/BreastCancerClassifier@production` on port `5002`.
 Send a prediction request to the MLflow scoring endpoint:
 
 ```bash
-curl -X POST http://localhost:5002/invocations \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer <TOKEN_IF_CONFIGURED>" \\
+curl -X POST http://localhost:5002/invocations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <TOKEN_IF_CONFIGURED>" \
   -d @serving_input.json
 ```
 
